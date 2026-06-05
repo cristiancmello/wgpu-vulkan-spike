@@ -94,16 +94,16 @@ register_commands!(
 
 pub fn parse_command(input: &str) -> Option<DrawCommand> {
     let list = parse_list(input)?;
-    let car = list.first()?;
-    let cdr = &list[1..];
+    let head = list.first()?;
+    let tail = &list[1..];
 
     for spec in COMMAND_SPECS {
-        if spec.matches(car, cdr.len()) {
-            return (spec.parser)(cdr);
+        if spec.matches(head, tail.len()) {
+            return (spec.parser)(tail);
         }
     }
 
-    if car == "present" && cdr.is_empty() {
+    if head == "present" && tail.is_empty() {
         Some(DrawCommand::Present)
     } else {
         None
