@@ -1,75 +1,112 @@
-#[derive(Clone, Debug, PartialEq)]
-pub enum DrawCommand {
-    Clear {
-        r: f32,
-        g: f32,
-        b: f32,
-        a: f32,
-    },
-    DrawTriangle {
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        x3: f32,
-        y3: f32,
-        r: f32,
-        g: f32,
-        b: f32,
-        a: f32,
-    },
-    DrawRect {
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        r: f32,
-        g: f32,
-        b: f32,
-        a: f32,
-    },
-    Present,
+type CommandParser = fn(&[String]) -> Option<DrawCommand>;
+
+struct CommandSpec {
+    name: &'static str,
+    param_count: usize,
+    parser: CommandParser,
 }
 
-impl DrawCommand {
-    pub fn triangle(values: [f32; 10]) -> Self {
-        let [x1, y1, x2, y2, x3, y3, r, g, b, a] = values;
-        DrawCommand::DrawTriangle {
-            x1,
-            y1,
-            x2,
-            y2,
-            x3,
-            y3,
-            r,
-            g,
-            b,
-            a,
+impl CommandSpec {
+    fn matches(&self, cmd_name: &str, param_count: usize) -> bool {
+        cmd_name == self.name && param_count == self.param_count
+    }
+}
+
+trait FieldCount {
+    const FIELD_COUNT: usize;
+}
+
+macro_rules! impl_field_count {
+    ($name:ident, $count:expr) => {
+        struct $name;
+        impl FieldCount for $name {
+            const FIELD_COUNT: usize = $count;
         }
-    }
-
-    pub fn clear(values: [f32; 4]) -> Self {
-        let [r, g, b, a] = values;
-        DrawCommand::Clear { r, g, b, a }
-    }
-
-    pub fn rect(values: [f32; 8]) -> Self {
-        let [x, y, w, h, r, g, b, a] = values;
-        DrawCommand::DrawRect { x, y, w, h, r, g, b, a }
-    }
+    };
 }
+
+
+macro_rules! register_commands {
+    (
+        $(
+            ($cmd_name:expr, $constructor:ident, $variant:ident, [$($field:ident),*])
+        ),* $(,)?
+    ) => {
+        $(
+            impl_field_count!($variant, count_fields!($($field),*));
+        )*
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum DrawCommand {
+            $(
+                $variant { $($field: f32),* }
+            ),*,
+            Present,
+        }
+
+        impl DrawCommand {
+            $(
+                pub fn $constructor(values: [f32; <$variant>::FIELD_COUNT]) -> Self {
+                    let [$($field),*] = values;
+                    DrawCommand::$variant { $($field),* }
+                }
+            )*
+        }
+
+        const COMMAND_SPECS: &[CommandSpec] = &[
+            $(
+                CommandSpec {
+                    name: $cmd_name,
+                    param_count: <$variant>::FIELD_COUNT,
+                    parser: {
+                        const fn make_parser() -> CommandParser {
+                            fn parser(params: &[String]) -> Option<DrawCommand> {
+                                parse_and_construct(params, DrawCommand::$constructor)
+                            }
+                            parser
+                        }
+                        make_parser()
+                    }
+                },
+            )*
+        ];
+    };
+}
+
+macro_rules! count_fields {
+    ($($field:ident),*) => {
+        {
+            let mut count = 0;
+            $(
+                let _ = stringify!($field);
+                count += 1;
+            )*
+            count
+        }
+    };
+}
+
+register_commands!(
+    ("clear", clear, Clear, [r, g, b, a]),
+    ("draw-triangle", triangle, DrawTriangle, [x1, y1, x2, y2, x3, y3, r, g, b, a]),
+    ("draw-rect", rect, DrawRect, [x, y, w, h, r, g, b, a]),
+);
 
 pub fn parse_command(input: &str) -> Option<DrawCommand> {
     let list = parse_list(input)?;
     let car = list.first()?;
     let cdr = &list[1..];
 
-    match (car.as_str(), cdr.len()) {
-        ("clear", 4) => parse_clear(cdr),
-        ("draw-triangle", 10) => parse_draw_triangle(cdr),
-        ("draw-rect", 8) => parse_draw_rect(cdr),
-        ("present", 0) => Some(DrawCommand::Present),
-        _ => None,
+    for spec in COMMAND_SPECS {
+        if spec.matches(car, cdr.len()) {
+            return (spec.parser)(cdr);
+        }
+    }
+
+    if car == "present" && cdr.is_empty() {
+        Some(DrawCommand::Present)
+    } else {
+        None
     }
 }
 
@@ -89,39 +126,24 @@ fn parse_list(input: &str) -> Option<Vec<String>> {
     )
 }
 
-fn parse_clear(params: &[String]) -> Option<DrawCommand> {
-    let values: [f32; 4] = params
+fn parse_floats(params: &[String]) -> Option<Vec<f32>> {
+    params
         .iter()
         .map(|s| s.parse::<f32>())
         .collect::<Result<Vec<_>, _>>()
-        .ok()?
-        .try_into()
-        .ok()?;
-
-    Some(DrawCommand::clear(values))
+        .ok()
 }
 
-fn parse_draw_triangle(params: &[String]) -> Option<DrawCommand> {
-    let values: [f32; 10] = params
-        .iter()
-        .map(|s| s.parse::<f32>())
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?
-        .try_into()
-        .ok()?;
-
-    Some(DrawCommand::triangle(values))
+fn parse_and_construct<const N: usize, F>(
+    params: &[String],
+    constructor: F,
+) -> Option<DrawCommand>
+where
+    F: Fn([f32; N]) -> DrawCommand,
+{
+    let values = parse_floats(params)?;
+    let array: [f32; N] = values.as_slice().try_into().ok()?;
+    Some(constructor(array))
 }
 
-fn parse_draw_rect(params: &[String]) -> Option<DrawCommand> {
-    let values: [f32; 8] = params
-        .iter()
-        .map(|s| s.parse::<f32>())
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?
-        .try_into()
-        .ok()?;
-
-    Some(DrawCommand::rect(values))
-}
 
