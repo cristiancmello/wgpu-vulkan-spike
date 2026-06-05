@@ -14,6 +14,24 @@ pub enum DrawCommand {
     },
 }
 
+impl DrawCommand {
+    pub fn triangle(values: [f32; 10]) -> Self {
+        let [x1, y1, x2, y2, x3, y3, r, g, b, a] = values;
+        DrawCommand::DrawTriangle {
+            x1,
+            y1,
+            x2,
+            y2,
+            x3,
+            y3,
+            r,
+            g,
+            b,
+            a,
+        }
+    }
+}
+
 pub fn parse_command(input: &str) -> Option<DrawCommand> {
     let list = parse_list(input)?;
     let car = list.first()?;
@@ -42,19 +60,14 @@ fn parse_list(input: &str) -> Option<Vec<String>> {
 }
 
 fn parse_draw_triangle(params: &[String]) -> Option<DrawCommand> {
-    let floats: Result<Vec<f32>, _> = params.iter().map(|s| s.parse()).collect();
+    let values: [f32; 10] = params
+        .iter()
+        .map(|s| s.parse::<f32>())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
+        .try_into()
+        .ok()?;
 
-    floats.ok().map(|v| DrawCommand::DrawTriangle {
-        x1: v[0],
-        y1: v[1],
-        x2: v[2],
-        y2: v[3],
-        x3: v[4],
-        y3: v[5],
-        r: v[6],
-        g: v[7],
-        b: v[8],
-        a: v[9],
-    })
+    Some(DrawCommand::triangle(values))
 }
 
