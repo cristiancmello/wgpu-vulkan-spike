@@ -12,72 +12,57 @@ Este projeto é um servidor de renderização que aceita comandos de desenho via
 
 ## Fases de Desenvolvimento
 
-### Fase 1 (ATUAL): Draw Command Buffer
+### Fase 1 (COMPLETA): Draw Command Buffer
 
 **Objetivo**: Estabelecer um canal de entrada de comandos via socket e acumulá-los em um buffer compartilhado.
 
-**Escopo**:
-- [ ] Unix socket listener em `/tmp/wgpu-draw.sock`
-- [ ] Parser de S-expressions para comandos de desenho
-- [ ] `DrawCommand` enum com tipos: `Clear`, `DrawTriangle`, `DrawRect`, `Present`
-- [ ] `Arc<Mutex<Vec<DrawCommand>>>` como buffer compartilhado
-- [ ] Thread separada para socket (não bloqueante para o event loop principal)
+**Status**: ✅ COMPLETA
 
-**Teste de Aceitação E2E**:
-```rust
-// tests/acceptance_buffer.rs
-#[test]
-fn client_sends_draw_triangle_command_appears_in_buffer() {
-    // 1. Sobe socket listener
-    // 2. Conecta via cliente
-    // 3. Envia: "(draw-triangle 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)\n"
-    // 4. Verifica que buffer contém DrawCommand::DrawTriangle com valores corretos
-}
-```
+**Implementado**:
+- ✅ Unix socket listener em `/tmp/wgpu-draw.sock` (aceita múltiplas conexões)
+- ✅ Parser de S-expressions para comandos de desenho (car = comando, cdr = parâmetros)
+- ✅ `DrawCommand` enum com tipos: `Clear`, `DrawTriangle`, `DrawRect`, `Present`
+- ✅ `Arc<Mutex<Vec<DrawCommand>>>` como buffer compartilhado
+- ✅ Thread separada para socket (não bloqueante para o event loop principal)
+- ✅ Construtores para cada variante (`DrawCommand::triangle()`, `clear()`, `rect()`)
 
-Este teste define o contrato externo.
-
-#### Checklist de Implementação — Fase 1
-
-**RED (Testes falhando)**
-- [DONE] Escrever teste de aceitação em `tests/acceptance_buffer.rs`
-
-**GREEN (Testes passando)**
-- [DONE] Implementar `DrawCommand` enum + `parse_command()` em `src/draw_command.rs`
-- [DONE] Implementar `spawn_socket_listener()` em `src/socket_listener.rs`
-- [DONE] Integrar socket listener em `src/main.rs`
-
-**VERIFY**
-- [DONE] Teste E2E passa: socket → parse → buffer contém comandos corretos
-- [DONE] `cargo test` — todos os testes passam
-
-**REFACTOR**
-- [DONE] Revisar nomes, estrutura, simplicidade
+**Testes**:
+- ✅ `tests/acceptance_buffer.rs` — cliente envia S-expr, comando aparece no buffer
+- ✅ Todos os testes passam (`cargo test`)
 
 ---
 
-### Fase 2 (FUTURA): Renderizador consome o buffer
+### Fase 2 (PARCIAL): Renderizador consome o buffer
 
 **Objetivo**: Fazer o renderizador wgpu consumir os comandos do buffer e apresentar cada frame.
 
-**Teste de Aceitação E2E**:
-```rust
-// tests/acceptance_render.rs
-#[test]
-fn buffer_with_draw_triangle_renders_to_surface() {
-    // 1. Sobe servidor
-    // 2. Envia draw-triangle
-    // 3. Captura frame (mock/offscreen buffer)
-    // 4. Verifica que pixels têm a cor esperada
-}
+**Status**: 🔄 PARCIAL (integração apenas, sem renderização visual)
+
+**Implementado**:
+- ✅ Socket listener integrado em `State::new()` — spawned como thread background
+- ✅ Render loop lê buffer a cada frame e loga comandos novos
+- ✅ Testes E2E em `tests/acceptance_render.rs` para Clear, DrawTriangle, Present
+
+**Exemplo de uso**:
+```bash
+# Terminal 1: inicia servidor
+cargo run
+
+# Terminal 2: envia comando
+printf '(draw-triangle 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)\n' | \
+  timeout 2 socat - UNIX-CONNECT:/tmp/wgpu-draw.sock
+
+# Resultado: comando é logado no stdout do servidor
+# New commands received: 1 total
+#   [0] DrawTriangle { x1: 0.0, y1: 0.5, ... r: 1.0, g: 0.0, b: 0.0, a: 1.0 }
 ```
 
-**Escopo**:
-- [ ] RenderPipeline com shader WGSL (triângulos coloridos por vértice)
-- [ ] Consumir buffer a cada frame
-- [ ] Converter DrawCommand → Vertex
-- [ ] Criar vertex buffer dinâmico
-- [ ] Render pass com clear color dinâmico
+**Próximas etapas (Fase 2 completa)**:
+- [ ] Shader WGSL (vertex + fragment) para renderizar triângulos
+- [ ] RenderPipeline com vertex buffers dinâmicos
+- [ ] Converter DrawCommand → Vertex data
+- [ ] Render pass que consome buffer a cada frame
+- [ ] Clear color dinâmico baseado em DrawCommand::Clear
 
 ---
 
@@ -202,11 +187,13 @@ cargo test client_sends_draw_triangle_command_appears_in_buffer
 
 | Arquivo | Responsabilidade | Status |
 |---|---|---|
-| `src/main.rs` | Event loop principal, State, integração do socket | ⏳ |
-| `src/draw_command.rs` | `DrawCommand` enum, `parse_command()`, testes unitários | ⏳ |
-| `src/socket_listener.rs` | `spawn_socket_listener()`, lógica de thread do socket | ⏳ |
-| `tests/acceptance_buffer.rs` | Teste E2E do buffer | ⏳ |
-| `Cargo.toml` | Dependências | ✅ |
+| `src/main.rs` | Event loop principal, State, integração socket + buffer | ✅ |
+| `src/draw_command.rs` | `DrawCommand` enum, `parse_command()`, construtores | ✅ |
+| `src/socket_listener.rs` | `spawn_socket_listener()`, aceita múltiplas conexões | ✅ |
+| `src/lib.rs` | Módulos públicos | ✅ |
+| `tests/acceptance_buffer.rs` | Teste E2E: socket → buffer | ✅ |
+| `tests/acceptance_render.rs` | Teste E2E: servidor recebe Clear/Triangle/Present | ✅ |
+| `Cargo.toml` | Dependências (wgpu 29.0.0, winit 0.30.8) | ✅ |
 
 ---
 
