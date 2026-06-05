@@ -24,7 +24,6 @@ pub fn spawn_socket_listener(
                 }
             }
         }
-        break;
     }
     
     Ok(())

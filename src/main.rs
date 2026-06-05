@@ -1,5 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
+use wgpu_vulkan_spike::draw_command::DrawCommand;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -15,6 +17,8 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
+    command_buffer: Arc<Mutex<Vec<DrawCommand>>>,
+    last_buffer_len: usize,
 }
 
 impl State {
@@ -37,6 +41,14 @@ impl State {
         let cap = surface.get_capabilities(&adapter);
         let surface_format = cap.formats[0];
 
+        let command_buffer = Arc::new(Mutex::new(Vec::new()));
+        let buffer_clone = Arc::clone(&command_buffer);
+
+        thread::spawn(move || {
+            wgpu_vulkan_spike::socket_listener::spawn_socket_listener("/tmp/wgpu-draw.sock", buffer_clone)
+                .expect("failed to spawn socket listener");
+        });
+
         let state = State {
             instance,
             window,
@@ -45,6 +57,8 @@ impl State {
             size,
             surface,
             surface_format,
+            command_buffer,
+            last_buffer_len: 0,
         };
 
         // Configure surface for the first time
@@ -80,6 +94,18 @@ impl State {
     }
 
     fn render(&mut self) {
+        let locked_buffer = self.command_buffer.lock().unwrap();
+
+        if !locked_buffer.is_empty() && locked_buffer.len() > self.last_buffer_len {
+            println!("New commands received: {} total", locked_buffer.len());
+            for (i, cmd) in locked_buffer[self.last_buffer_len..].iter().enumerate() {
+                println!("  [{}] {:?}", self.last_buffer_len + i, cmd);
+            }
+            self.last_buffer_len = locked_buffer.len();
+        }
+
+        drop(locked_buffer);
+
         // Create texture view.
         // NOTE: We must handle Timeout because the surface may be unavailable
         // (e.g., when the window is occluded on macOS).

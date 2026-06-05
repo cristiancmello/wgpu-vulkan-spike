@@ -40,19 +40,19 @@ Este teste define o contrato externo.
 #### Checklist de Implementação — Fase 1
 
 **RED (Testes falhando)**
-- [ ] Escrever teste de aceitação em `tests/acceptance_buffer.rs`
+- [DONE] Escrever teste de aceitação em `tests/acceptance_buffer.rs`
 
 **GREEN (Testes passando)**
-- [ ] Implementar `DrawCommand` enum + `parse_command()` em `src/draw_command.rs`
-- [ ] Implementar `spawn_socket_listener()` em `src/socket_listener.rs`
-- [ ] Integrar socket listener em `src/main.rs`
+- [DONE] Implementar `DrawCommand` enum + `parse_command()` em `src/draw_command.rs`
+- [DONE] Implementar `spawn_socket_listener()` em `src/socket_listener.rs`
+- [DONE] Integrar socket listener em `src/main.rs`
 
 **VERIFY**
-- [ ] Teste E2E passa: socket → parse → buffer contém comandos corretos
-- [ ] `cargo test` — todos os testes passam
+- [DONE] Teste E2E passa: socket → parse → buffer contém comandos corretos
+- [DONE] `cargo test` — todos os testes passam
 
 **REFACTOR**
-- [ ] Revisar nomes, estrutura, simplicidade
+- [DONE] Revisar nomes, estrutura, simplicidade
 
 ---
 
