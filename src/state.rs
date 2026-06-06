@@ -138,8 +138,8 @@ impl State {
 
                     self.primitives.add(crate::primitive::Primitive::new(*id, vertices));
                 }
-                DrawCommand::SetTransform { id, tx, ty, sx, sy } => {
-                    self.transforms.set(*id, crate::transform::Transform::new(*tx, *ty, *sx, *sy, 0.0));
+                DrawCommand::SetTransform { id, tx, ty, sx, sy, angle } => {
+                    self.transforms.set(*id, crate::transform::Transform::new(*tx, *ty, *sx, *sy, *angle));
                 }
                 DrawCommand::Reset => {
                     self.primitives.clear();

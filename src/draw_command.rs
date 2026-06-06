@@ -42,7 +42,7 @@ macro_rules! register_commands {
                 $variant { id: u32, $($field: f32),* }
             ),*,
             Clear { r: f32, g: f32, b: f32, a: f32 },
-            SetTransform { id: u32, tx: f32, ty: f32, sx: f32, sy: f32 },
+            SetTransform { id: u32, tx: f32, ty: f32, sx: f32, sy: f32, angle: f32 },
             Reset,
             Present,
         }
@@ -137,7 +137,8 @@ fn parse_set_transform(params: &[String]) -> Option<DrawCommand> {
     let ty = params[2].parse::<f32>().ok()?;
     let sx = params[3].parse::<f32>().ok()?;
     let sy = params[4].parse::<f32>().ok()?;
-    Some(DrawCommand::SetTransform { id, tx, ty, sx, sy })
+    let angle = params[5].parse::<f32>().ok()?;
+    Some(DrawCommand::SetTransform { id, tx, ty, sx, sy, angle })
 }
 
 fn parse_list(input: &str) -> Option<Vec<String>> {

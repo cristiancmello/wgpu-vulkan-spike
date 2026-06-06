@@ -12,7 +12,8 @@ fn parse_set_transform_command() {
             tx: 0.25,
             ty: 0.0,
             sx: 1.0,
-            sy: 1.0
+            sy: 1.0,
+            angle: 0.0
         })
     );
 }
@@ -28,7 +29,8 @@ fn parse_set_transform_with_negative_values() {
             tx: -0.5,
             ty: 0.5,
             sx: 2.0,
-            sy: 2.0
+            sy: 2.0,
+            angle: 0.0
         })
     );
 }
