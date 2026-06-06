@@ -19,6 +19,8 @@ pub struct State {
     command_buffer: Arc<Mutex<Vec<DrawCommand>>>,
     pipeline: wgpu::RenderPipeline,
     transforms: TransformBuffer,
+    transform_buffer: wgpu::Buffer,
+    transform_bind_group: wgpu::BindGroup,
 }
 
 impl State {
@@ -52,7 +54,28 @@ impl State {
                 .expect("failed to spawn socket listener");
         });
 
-        let pipeline = renderer::build_pipeline(&device, surface_format);
+        let transform_layout = renderer::create_transform_bind_group_layout(&device);
+        let pipeline = renderer::build_pipeline(&device, surface_format, &transform_layout);
+
+        let identity_matrix = crate::transform::Transform::identity().to_matrix();
+        let transform_uniform = renderer::TransformUniform {
+            matrix: identity_matrix,
+        };
+
+        let transform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("transform_buffer"),
+            contents: bytemuck::cast_slice(&[transform_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let transform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &transform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: transform_buffer.as_entire_binding(),
+            }],
+            label: Some("transform_bind_group"),
+        });
 
         let state = State {
             instance,
@@ -65,6 +88,8 @@ impl State {
             command_buffer,
             pipeline,
             transforms: TransformBuffer::new(),
+            transform_buffer,
+            transform_bind_group,
         };
 
         state.configure_surface();
@@ -104,6 +129,14 @@ impl State {
         }
     }
 
+    fn update_transform_buffer(&self) {
+        let transform = self.transforms.get(1).unwrap_or_else(crate::transform::Transform::identity);
+        let uniform = renderer::TransformUniform {
+            matrix: transform.to_matrix(),
+        };
+        self.queue.write_buffer(&self.transform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
     pub fn render(&mut self) {
         let commands = {
             let locked = self.command_buffer.lock().unwrap();
@@ -111,6 +144,7 @@ impl State {
         };
 
         self.process_transforms(&commands);
+        self.update_transform_buffer();
 
         let (clear_color, vertices) = crate::draw_command::extract_draw_data(&commands);
 
@@ -171,6 +205,7 @@ impl State {
 
         if let Some(ref vbuf) = vertex_buffer {
             renderpass.set_pipeline(&self.pipeline);
+            renderpass.set_bind_group(0, &self.transform_bind_group, &[]);
             renderpass.set_vertex_buffer(0, vbuf.slice(..));
             renderpass.draw(0..vertices.len() as u32, 0..1);
         }
