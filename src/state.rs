@@ -6,6 +6,8 @@ use winit::window::Window;
 
 use crate::draw_command::DrawCommand;
 use crate::renderer;
+use crate::transform::TransformBuffer;
+use crate::primitive::PrimitiveBuffer;
 
 pub struct State {
     instance: wgpu::Instance,
@@ -17,6 +19,9 @@ pub struct State {
     surface_format: wgpu::TextureFormat,
     command_buffer: Arc<Mutex<Vec<DrawCommand>>>,
     pipeline: wgpu::RenderPipeline,
+    transforms: TransformBuffer,
+    primitives: PrimitiveBuffer,
+    clear_color: wgpu::Color,
 }
 
 impl State {
@@ -50,7 +55,8 @@ impl State {
                 .expect("failed to spawn socket listener");
         });
 
-        let pipeline = renderer::build_pipeline(&device, surface_format);
+        let transform_layout = renderer::create_transform_bind_group_layout(&device);
+        let pipeline = renderer::build_pipeline(&device, surface_format, &transform_layout);
 
         let state = State {
             instance,
@@ -62,6 +68,9 @@ impl State {
             surface_format,
             command_buffer,
             pipeline,
+            transforms: TransformBuffer::new(),
+            primitives: PrimitiveBuffer::new(),
+            clear_color: wgpu::Color::BLACK,
         };
 
         state.configure_surface();
@@ -92,13 +101,63 @@ impl State {
         self.configure_surface();
     }
 
+    fn process_commands(&mut self, commands: &[DrawCommand]) {
+        for cmd in commands {
+            match cmd {
+                DrawCommand::Clear { r, g, b, a } => {
+                    self.clear_color = wgpu::Color {
+                        r: *r as f64,
+                        g: *g as f64,
+                        b: *b as f64,
+                        a: *a as f64,
+                    };
+                }
+                DrawCommand::DrawTriangle { id, x1, y1, x2, y2, x3, y3, r, g, b, a } => {
+                    let color = [*r, *g, *b, *a];
+                    let mut vertices = Vec::new();
+                    vertices.push(crate::renderer::Vertex { position: [*x1, *y1], color });
+                    vertices.push(crate::renderer::Vertex { position: [*x2, *y2], color });
+                    vertices.push(crate::renderer::Vertex { position: [*x3, *y3], color });
+                    self.primitives.add(crate::primitive::Primitive::new(*id, vertices));
+                }
+                DrawCommand::DrawRect { id, x, y, w, h, r, g, b, a } => {
+                    let color = [*r, *g, *b, *a];
+                    let x1 = *x;
+                    let y1 = *y;
+                    let x2 = *x + *w;
+                    let y2 = *y - *h;
+
+                    let mut vertices = Vec::new();
+                    vertices.push(crate::renderer::Vertex { position: [x1, y1], color });
+                    vertices.push(crate::renderer::Vertex { position: [x2, y1], color });
+                    vertices.push(crate::renderer::Vertex { position: [x1, y2], color });
+
+                    vertices.push(crate::renderer::Vertex { position: [x2, y1], color });
+                    vertices.push(crate::renderer::Vertex { position: [x2, y2], color });
+                    vertices.push(crate::renderer::Vertex { position: [x1, y2], color });
+
+                    self.primitives.add(crate::primitive::Primitive::new(*id, vertices));
+                }
+                DrawCommand::SetTransform { id, tx, ty, sx, sy, angle } => {
+                    self.transforms.set(*id, crate::transform::Transform::new(*tx, *ty, *sx, *sy, *angle));
+                }
+                DrawCommand::Reset => {
+                    self.primitives.clear();
+                    self.transforms.clear();
+                }
+                DrawCommand::Present => {}
+            }
+        }
+    }
+
+
     pub fn render(&mut self) {
         let commands = {
             let locked = self.command_buffer.lock().unwrap();
             locked.clone()
         };
 
-        let (clear_color, vertices) = crate::draw_command::extract_draw_data(&commands);
+        self.process_commands(&commands);
 
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
@@ -124,18 +183,6 @@ impl State {
                 ..Default::default()
             });
 
-        let vertex_buffer = if !vertices.is_empty() {
-            Some(self.device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("vertex_buffer"),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                },
-            ))
-        } else {
-            None
-        };
-
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
         let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -145,7 +192,7 @@ impl State {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color),
+                    load: wgpu::LoadOp::Clear(self.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -155,10 +202,50 @@ impl State {
             multiview_mask: None,
         });
 
-        if let Some(ref vbuf) = vertex_buffer {
-            renderpass.set_pipeline(&self.pipeline);
-            renderpass.set_vertex_buffer(0, vbuf.slice(..));
-            renderpass.draw(0..vertices.len() as u32, 0..1);
+        let transform_layout = renderer::create_transform_bind_group_layout(&self.device);
+
+        let draw_calls: Vec<_> = self.primitives
+            .get_all()
+            .iter()
+            .map(|p| {
+                let vertex_buffer = self.device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("vertex_buffer"),
+                        contents: bytemuck::cast_slice(&p.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    },
+                );
+
+                let transform = self.transforms.get(p.id).unwrap_or_else(renderer::Transform::identity);
+                let uniform = renderer::TransformUniform {
+                    matrix: transform.to_matrix(),
+                };
+
+                let transform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("transform_buffer_per_primitive"),
+                    contents: bytemuck::cast_slice(&[uniform]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+
+                let transform_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &transform_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: transform_buffer.as_entire_binding(),
+                    }],
+                    label: Some("transform_bind_group_per_primitive"),
+                });
+
+                (vertex_buffer, transform_bind_group, p.vertices.len())
+            })
+            .collect();
+
+        renderpass.set_pipeline(&self.pipeline);
+
+        for (_i, (vertex_buffer, transform_bind_group, vertex_count)) in draw_calls.iter().enumerate() {
+            renderpass.set_bind_group(0, transform_bind_group, &[]);
+            renderpass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            renderpass.draw(0..*vertex_count as u32, 0..1);
         }
 
         drop(renderpass);
