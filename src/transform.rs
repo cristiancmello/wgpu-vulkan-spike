@@ -29,10 +29,10 @@ impl Transform {
         let sin_a = self.angle.sin();
 
         [
-            [self.sx * cos_a, -self.sy * sin_a, 0.0, self.tx],
-            [self.sx * sin_a, self.sy * cos_a, 0.0, self.ty],
+            [self.sx * cos_a, self.sx * sin_a, 0.0, 0.0],
+            [-self.sy * sin_a, self.sy * cos_a, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
+            [self.tx, self.ty, 0.0, 1.0],
         ]
     }
 }

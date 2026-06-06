@@ -72,8 +72,8 @@ fn transform_identity() {
 fn transform_translation() {
     let t = Transform::new(0.5, -0.25, 1.0, 1.0, 0.0);
     let matrix = t.to_matrix();
-    assert_eq!(matrix[0][3], 0.5);
-    assert_eq!(matrix[1][3], -0.25);
+    assert_eq!(matrix[3][0], 0.5);
+    assert_eq!(matrix[3][1], -0.25);
 }
 
 #[test]
