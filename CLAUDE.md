@@ -32,16 +32,22 @@ Este projeto é um servidor de renderização que aceita comandos de desenho via
 
 ---
 
-### Fase 2 (PARCIAL): Renderizador consome o buffer
+### Fase 2 (COMPLETA): Renderizador consome o buffer
 
 **Objetivo**: Fazer o renderizador wgpu consumir os comandos do buffer e apresentar cada frame.
 
-**Status**: 🔄 PARCIAL (integração apenas, sem renderização visual)
+**Status**: ✅ COMPLETA
 
 **Implementado**:
-- ✅ Socket listener integrado em `State::new()` — spawned como thread background
-- ✅ Render loop lê buffer a cada frame e loga comandos novos
-- ✅ Testes E2E em `tests/acceptance_render.rs` para Clear, DrawTriangle, Present
+- ✅ Shader WGSL (vertex + fragment) — NDC → clip space, color passthrough
+- ✅ RenderPipeline com vertex buffer layout explícito
+- ✅ DrawCommand → Vertex conversion (`extract_draw_data`)
+- ✅ Clear color dinâmico via `DrawCommand::Clear`
+- ✅ `DrawCommand::DrawTriangle` — 3 vértices coloridos
+- ✅ `DrawCommand::DrawRect` — 2 triângulos (CCW winding)
+- ✅ Socket listener lê **linha por linha** (múltiplos comandos por conexão)
+- ✅ Testes E2E: 5 testes em `tests/acceptance_render.rs` (Clear, Triangle, Rect, Multiple commands)
+- ✅ Testes unitários do buffer: 1 teste em `tests/acceptance_buffer.rs`
 
 **Exemplo de uso**:
 ```bash
@@ -57,12 +63,62 @@ printf '(draw-triangle 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)\n' | \
 #   [0] DrawTriangle { x1: 0.0, y1: 0.5, ... r: 1.0, g: 0.0, b: 0.0, a: 1.0 }
 ```
 
-**Próximas etapas (Fase 2 completa)**:
-- [ ] Shader WGSL (vertex + fragment) para renderizar triângulos
-- [ ] RenderPipeline com vertex buffers dinâmicos
-- [ ] Converter DrawCommand → Vertex data
-- [ ] Render pass que consome buffer a cada frame
-- [ ] Clear color dinâmico baseado em DrawCommand::Clear
+**Etapa 1 (COMPLETA): Renderizar Triângulo Hardcoded**:
+- ✅ `src/shader.wgsl` — vertex shader (NDC → clip space) + fragment shader (passthrough color)
+- ✅ Struct `Vertex { position: [f32;2], color: [f32;4] }` com `bytemuck::Pod + Zeroable`
+- ✅ `build_pipeline()` — RenderPipeline com vertex buffer layout explícito
+- ✅ `render()` — hardcoded triângulo vermelho, clear color BLACK
+- ✅ `bytemuck` adicionado ao Cargo.toml
+- ✅ **Triângulo vermelho aparece na janela**
+
+**O que o código faz** (linha por linha):
+1. `Vertex` — struct com `position` (2 floats NDC) e `color` (4 floats RGBA)
+2. `build_pipeline()` — cria shader module via `include_str!`, layout com `bind_group_layouts` e `immediate_size`
+3. Vertex buffer layout — stride = 24 bytes (2×f32 + 4×f32), atributos em `location(0)` e `location(1)`
+4. RenderPipeline — topology `TriangleList`, blend `ALPHA_BLENDING`, no depth/stencil
+5. `render()` — cria vertex buffer via `create_buffer_init`, comando encoder, renderpass com `LoadOp::Clear(BLACK)`, `set_pipeline`, `set_vertex_buffer`, `draw(0..3)`
+
+**Etapa 2 (COMPLETA): Ler DrawCommand do Buffer e Renderizar**:
+- ✅ `extract_draw_data(commands)` — extrai `Clear` para clear color, `DrawTriangle` para vertices
+- ✅ `render()` refatorado — lê buffer, clona, extrai dados, cria vertex buffer dinâmico
+- ✅ Clear color dinâmico baseado em `DrawCommand::Clear`
+- ✅ Cores dos triângulos vêm dos comandos (não mais hardcoded vermelho)
+- ✅ Draw condicional — só desenha se há vértices
+- ✅ **BUG FIX**: `socket_listener` refatorado para ler **linha por linha** (não apenas 256 bytes por conexão)
+  - Antes: `Read::read()` lia um único bloco e fechava
+  - Depois: `BufReader::read_line()` em loop — processa múltiplas linhas na mesma conexão
+
+**O que muda no render()**:
+1. Clone commands do buffer → extrai (clear_color, vertices)
+2. Se vertices não vazio → cria buffer dinâmico com `create_buffer_init`
+3. RenderPass com `clear_color` (não hardcoded BLACK)
+4. `renderpass.draw(0..vertices.len())` — dinâmico
+
+**Teste Manual** ✅:
+```bash
+# Terminal 1
+cargo run
+
+# Terminal 2 (após janela abrir)
+printf '(clear 0.0 0.0 0.0 1.0)\n(draw-triangle 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)\n' | socat - UNIX-CONNECT:/tmp/wgpu-draw.sock
+
+# Resultado: Triângulo vermelho renderizado na janela ✓
+```
+
+**Etapa 3 (COMPLETA): DrawRect**:
+- ✅ Implementado `DrawCommand::DrawRect` como 2 triângulos (CCW winding)
+- ✅ Rect formula: (x, y) = top-left, w=width, h=height
+  - Triangle 1: (x, y), (x+w, y), (x, y-h)
+  - Triangle 2: (x+w, y), (x+w, y-h), (x, y-h)
+- ✅ Teste manual: triângulo vermelho + retângulo verde renderizados juntos ✓
+
+**Próxima Etapa (Fase 3): Otimizações e Recursos Avançados**:
+- [ ] Index buffers (ao invés de duplicar vértices em DrawRect)
+- [ ] Multiple draw calls (ao invés de um grande buffer)
+- [ ] Depth testing e z-ordering
+- [ ] Texture support
+- [ ] Transform matrices (translate, rotate, scale)
+- [ ] Mais tipos de primitivos (círculos, linhas)
 
 ---
 
@@ -190,10 +246,11 @@ cargo test client_sends_draw_triangle_command_appears_in_buffer
 | `src/main.rs` | Event loop principal, State, integração socket + buffer | ✅ |
 | `src/draw_command.rs` | `DrawCommand` enum, `parse_command()`, construtores | ✅ |
 | `src/socket_listener.rs` | `spawn_socket_listener()`, aceita múltiplas conexões | ✅ |
+| `src/shader.wgsl` | Vertex + fragment shader para triângulos | 🔄 |
 | `src/lib.rs` | Módulos públicos | ✅ |
 | `tests/acceptance_buffer.rs` | Teste E2E: socket → buffer | ✅ |
 | `tests/acceptance_render.rs` | Teste E2E: servidor recebe Clear/Triangle/Present | ✅ |
-| `Cargo.toml` | Dependências (wgpu 29.0.0, winit 0.30.8) | ✅ |
+| `Cargo.toml` | Dependências (wgpu 29.0.0, winit 0.30.8, bytemuck) | 🔄 |
 
 ---
 

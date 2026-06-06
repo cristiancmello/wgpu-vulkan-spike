@@ -1,7 +1,128 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use wgpu::util::DeviceExt;
 use wgpu_vulkan_spike::draw_command::DrawCommand;
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 2],
+    color: [f32; 4],
+}
+
+fn build_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("triangle_shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+    });
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("pipeline_layout"),
+        bind_group_layouts: &[],
+        immediate_size: 0,
+    });
+
+    let vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ],
+    };
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("triangle_pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[vertex_layout],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+fn extract_draw_data(commands: &[DrawCommand]) -> (wgpu::Color, Vec<Vertex>) {
+    let mut clear_color = wgpu::Color::BLACK;
+    let mut vertices = Vec::new();
+
+    for cmd in commands {
+        match cmd {
+            DrawCommand::Clear { r, g, b, a } => {
+                clear_color = wgpu::Color {
+                    r: *r as f64,
+                    g: *g as f64,
+                    b: *b as f64,
+                    a: *a as f64,
+                };
+            }
+            DrawCommand::DrawTriangle { x1, y1, x2, y2, x3, y3, r, g, b, a } => {
+                let color = [*r, *g, *b, *a];
+                vertices.push(Vertex { position: [*x1, *y1], color });
+                vertices.push(Vertex { position: [*x2, *y2], color });
+                vertices.push(Vertex { position: [*x3, *y3], color });
+            }
+            DrawCommand::DrawRect { x, y, w, h, r, g, b, a } => {
+                // Rectangle as 2 triangles (CCW winding)
+                // Triangle 1: top-left, top-right, bottom-left
+                // Triangle 2: top-right, bottom-right, bottom-left
+                let color = [*r, *g, *b, *a];
+
+                let x1 = *x;
+                let y1 = *y;
+                let x2 = *x + *w;
+                let y2 = *y - *h;
+
+                // Triangle 1
+                vertices.push(Vertex { position: [x1, y1], color });
+                vertices.push(Vertex { position: [x2, y1], color });
+                vertices.push(Vertex { position: [x1, y2], color });
+
+                // Triangle 2
+                vertices.push(Vertex { position: [x2, y1], color });
+                vertices.push(Vertex { position: [x2, y2], color });
+                vertices.push(Vertex { position: [x1, y2], color });
+            }
+            DrawCommand::Present => {}
+        }
+    }
+
+    (clear_color, vertices)
+}
+
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -18,7 +139,7 @@ struct State {
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     command_buffer: Arc<Mutex<Vec<DrawCommand>>>,
-    last_buffer_len: usize,
+    pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
@@ -49,6 +170,8 @@ impl State {
                 .expect("failed to spawn socket listener");
         });
 
+        let pipeline = build_pipeline(&device, surface_format);
+
         let state = State {
             instance,
             window,
@@ -58,7 +181,7 @@ impl State {
             surface,
             surface_format,
             command_buffer,
-            last_buffer_len: 0,
+            pipeline,
         };
 
         // Configure surface for the first time
@@ -94,21 +217,16 @@ impl State {
     }
 
     fn render(&mut self) {
-        let locked_buffer = self.command_buffer.lock().unwrap();
+        // Read commands from buffer (clone to drop lock immediately)
+        let commands = {
+            let locked = self.command_buffer.lock().unwrap();
+            locked.clone()
+        };
 
-        if !locked_buffer.is_empty() && locked_buffer.len() > self.last_buffer_len {
-            println!("New commands received: {} total", locked_buffer.len());
-            for (i, cmd) in locked_buffer[self.last_buffer_len..].iter().enumerate() {
-                println!("  [{}] {:?}", self.last_buffer_len + i, cmd);
-            }
-            self.last_buffer_len = locked_buffer.len();
-        }
+        // Extract clear color and vertices from commands
+        let (clear_color, vertices) = extract_draw_data(&commands);
 
-        drop(locked_buffer);
-
-        // Create texture view.
-        // NOTE: We must handle Timeout because the surface may be unavailable
-        // (e.g., when the window is occluded on macOS).
+        // Get surface texture
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
             wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => return,
@@ -128,23 +246,35 @@ impl State {
         let texture_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
-                // Without add_srgb_suffix() the image we will be working with
-                // might not be "gamma correct".
                 format: Some(self.surface_format.add_srgb_suffix()),
                 ..Default::default()
             });
 
-        // Renders a GREEN screen
+        // Create vertex buffer if we have vertices
+        let vertex_buffer = if !vertices.is_empty() {
+            Some(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("vertex_buffer"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
+            ))
+        } else {
+            None
+        };
+
+        // Create command encoder
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        // Create the renderpass which will clear the screen.
-        let renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+
+        // Create render pass
+        let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &texture_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                    load: wgpu::LoadOp::Clear(clear_color),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -154,12 +284,17 @@ impl State {
             multiview_mask: None,
         });
 
-        // If you wanted to call any drawing commands, they would go here.
+        // Draw vertices if we have any
+        if let Some(ref vbuf) = vertex_buffer {
+            renderpass.set_pipeline(&self.pipeline);
+            renderpass.set_vertex_buffer(0, vbuf.slice(..));
+            renderpass.draw(0..vertices.len() as u32, 0..1);
+        }
 
-        // End the renderpass.
+        // Drop renderpass to end it
         drop(renderpass);
 
-        // Submit the command in the queue to execute
+        // Submit command buffer
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
