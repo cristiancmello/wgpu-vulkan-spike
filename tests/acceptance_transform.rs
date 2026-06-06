@@ -3,7 +3,7 @@ use wgpu_vulkan_spike::transform::Transform;
 
 #[test]
 fn parse_set_transform_command() {
-    let input = "(set-transform 1 0.25 0.0 1.0 1.0)";
+    let input = "(set-transform 1 0.25 0.0 1.0 1.0 0.0)";
     let cmd = parse_command(input);
     assert_eq!(
         cmd,
@@ -19,7 +19,7 @@ fn parse_set_transform_command() {
 
 #[test]
 fn parse_set_transform_with_negative_values() {
-    let input = "(set-transform 2 -0.5 0.5 2.0 2.0)";
+    let input = "(set-transform 2 -0.5 0.5 2.0 2.0 0.0)";
     let cmd = parse_command(input);
     assert_eq!(
         cmd,
@@ -35,9 +35,31 @@ fn parse_set_transform_with_negative_values() {
 
 #[test]
 fn parse_set_transform_with_extra_params_fails() {
-    let input = "(set-transform 2 -0.5 0.5 2.0 2.0 0.785)";
+    let input = "(set-transform 2 -0.5 0.5 2.0 2.0 0.785 0.5)";
     let cmd = parse_command(input);
     assert!(cmd.is_none());
+}
+
+#[test]
+fn parse_draw_triangle_with_id() {
+    let input = "(draw-triangle 1 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)";
+    let cmd = parse_command(input);
+    assert_eq!(
+        cmd,
+        Some(DrawCommand::DrawTriangle {
+            id: 1,
+            x1: 0.0,
+            y1: 0.5,
+            x2: -0.5,
+            y2: -0.5,
+            x3: 0.5,
+            y3: -0.5,
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0
+        })
+    );
 }
 
 #[test]
