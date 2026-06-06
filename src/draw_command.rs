@@ -41,6 +41,7 @@ macro_rules! register_commands {
             $(
                 $variant { $($field: f32),* }
             ),*,
+            SetTransform { id: u32, tx: f32, ty: f32, sx: f32, sy: f32 },
             Present,
         }
 
@@ -105,9 +106,20 @@ pub fn parse_command(input: &str) -> Option<DrawCommand> {
 
     if head == "present" && tail.is_empty() {
         Some(DrawCommand::Present)
+    } else if head == "set-transform" && tail.len() == 5 {
+        parse_set_transform(tail)
     } else {
         None
     }
+}
+
+fn parse_set_transform(params: &[String]) -> Option<DrawCommand> {
+    let id = params[0].parse::<u32>().ok()?;
+    let tx = params[1].parse::<f32>().ok()?;
+    let ty = params[2].parse::<f32>().ok()?;
+    let sx = params[3].parse::<f32>().ok()?;
+    let sy = params[4].parse::<f32>().ok()?;
+    Some(DrawCommand::SetTransform { id, tx, ty, sx, sy })
 }
 
 fn parse_list(input: &str) -> Option<Vec<String>> {
@@ -182,6 +194,7 @@ pub fn extract_draw_data(commands: &[DrawCommand]) -> (wgpu::Color, Vec<crate::r
                 vertices.push(crate::renderer::Vertex { position: [x2, y2], color });
                 vertices.push(crate::renderer::Vertex { position: [x1, y2], color });
             }
+            DrawCommand::SetTransform { .. } => {}
             DrawCommand::Present => {}
         }
     }
