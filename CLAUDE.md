@@ -112,12 +112,37 @@ printf '(clear 0.0 0.0 0.0 1.0)\n(draw-triangle 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0
   - Triangle 2: (x+w, y), (x+w, y-h), (x, y-h)
 - ✅ Teste manual: triângulo vermelho + retângulo verde renderizados juntos ✓
 
-**Próxima Etapa (Fase 3): Otimizações e Recursos Avançados**:
-- [ ] Index buffers (ao invés de duplicar vértices em DrawRect)
+---
+
+### Fase 3 (EM PLANEJAMENTO): Transform Matrices
+
+**Objetivo**: Permitir que o cliente animar primitivos (transladar, rotacionar, escalar) em tempo real sem recalcular geometria.
+
+**Status**: 🔄 EM PLANEJAMENTO
+
+**Rationale**: Sem transforms, o cliente não consegue animar nada. Index buffers (próxima otimização) só fazem sentido **depois** que transforms estiverem prontos.
+
+**Implementação esperada**:
+- [ ] `DrawCommand` com ID para rastrear primitivos
+- [ ] `SetTransform { id, tx, ty, sx, sy, angle }` comando
+- [ ] Bind group para uniforms (transform matrix por ID)
+- [ ] Shader WGSL recebe matriz — posiciona vértices dinamicamente
+- [ ] HashMap `transforms: HashMap<u32, Matrix4<f32>>` em State
+- [ ] Testes E2E: enviar DrawTriangle, depois SetTransform, verificar posição
+
+**Exemplo de uso**:
+```bash
+# Terminal 2 (após servidor rodar)
+printf '(draw-triangle 1 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)\n' | socat - UNIX-CONNECT:/tmp/wgpu-draw.sock
+printf '(set-transform 1 0.25 0.0 1.0 1.0 0.0)\n' | socat - UNIX-CONNECT:/tmp/wgpu-draw.sock
+# Resultado: Triângulo translada 0.25 à direita
+```
+
+**Próximas Otimizações (Fase 4+)**:
+- [ ] Index buffers (reutilizar geometria com transforms diferentes)
 - [ ] Multiple draw calls (ao invés de um grande buffer)
 - [ ] Depth testing e z-ordering
 - [ ] Texture support
-- [ ] Transform matrices (translate, rotate, scale)
 - [ ] Mais tipos de primitivos (círculos, linhas)
 
 ---
@@ -154,6 +179,7 @@ Cada comando é uma S-expression em uma linha, terminado com `\n`.
 | Clear | `(clear r g b a)` | `(clear 1.0 0.0 0.0 1.0)` |
 | Draw Triangle | `(draw-triangle x1 y1 x2 y2 x3 y3 r g b a)` | `(draw-triangle 0.0 0.5 -0.5 -0.5 0.5 -0.5 1.0 0.0 0.0 1.0)` |
 | Draw Rectangle | `(draw-rect x y w h r g b a)` | `(draw-rect -0.5 -0.5 1.0 1.0 0.0 1.0 0.0 0.5)` |
+| Set Transform | `(set-transform id tx ty sx sy angle)` | `(set-transform 1 0.25 0.0 1.0 1.0 0.0)` |
 | Present | `(present)` | `(present)` |
 
 **Coordenadas**: NDC (Normalized Device Coordinates), X e Y em `[-1.0, 1.0]`. Y cresce para cima.
@@ -243,14 +269,16 @@ cargo test client_sends_draw_triangle_command_appears_in_buffer
 
 | Arquivo | Responsabilidade | Status |
 |---|---|---|
-| `src/main.rs` | Event loop principal, State, integração socket + buffer | ✅ |
-| `src/draw_command.rs` | `DrawCommand` enum, `parse_command()`, construtores | ✅ |
+| `src/main.rs` | Event loop winit, App handler | ✅ |
+| `src/state.rs` | State struct, render(), resize() — lógica de renderização | ✅ |
+| `src/renderer.rs` | Vertex struct, build_pipeline() — wgpu setup | ✅ |
+| `src/draw_command.rs` | `DrawCommand` enum, `parse_command()`, `extract_draw_data()` | ✅ |
 | `src/socket_listener.rs` | `spawn_socket_listener()`, aceita múltiplas conexões | ✅ |
-| `src/shader.wgsl` | Vertex + fragment shader para triângulos | 🔄 |
+| `src/shader.wgsl` | Vertex + fragment shader (NDC → clip space, color passthrough) | ✅ |
 | `src/lib.rs` | Módulos públicos | ✅ |
 | `tests/acceptance_buffer.rs` | Teste E2E: socket → buffer | ✅ |
-| `tests/acceptance_render.rs` | Teste E2E: servidor recebe Clear/Triangle/Present | ✅ |
-| `Cargo.toml` | Dependências (wgpu 29.0.0, winit 0.30.8, bytemuck) | 🔄 |
+| `tests/acceptance_render.rs` | Teste E2E: Clear/Triangle/Rect/Present | ✅ |
+| `Cargo.toml` | Dependências (wgpu 29.0.0, winit 0.30.8, bytemuck) | ✅ |
 
 ---
 
