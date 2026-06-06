@@ -146,4 +146,46 @@ where
     Some(constructor(array))
 }
 
+pub fn extract_draw_data(commands: &[DrawCommand]) -> (wgpu::Color, Vec<crate::renderer::Vertex>) {
+    let mut clear_color = wgpu::Color::BLACK;
+    let mut vertices = Vec::new();
+
+    for cmd in commands {
+        match cmd {
+            DrawCommand::Clear { r, g, b, a } => {
+                clear_color = wgpu::Color {
+                    r: *r as f64,
+                    g: *g as f64,
+                    b: *b as f64,
+                    a: *a as f64,
+                };
+            }
+            DrawCommand::DrawTriangle { x1, y1, x2, y2, x3, y3, r, g, b, a } => {
+                let color = [*r, *g, *b, *a];
+                vertices.push(crate::renderer::Vertex { position: [*x1, *y1], color });
+                vertices.push(crate::renderer::Vertex { position: [*x2, *y2], color });
+                vertices.push(crate::renderer::Vertex { position: [*x3, *y3], color });
+            }
+            DrawCommand::DrawRect { x, y, w, h, r, g, b, a } => {
+                let color = [*r, *g, *b, *a];
+
+                let x1 = *x;
+                let y1 = *y;
+                let x2 = *x + *w;
+                let y2 = *y - *h;
+
+                vertices.push(crate::renderer::Vertex { position: [x1, y1], color });
+                vertices.push(crate::renderer::Vertex { position: [x2, y1], color });
+                vertices.push(crate::renderer::Vertex { position: [x1, y2], color });
+
+                vertices.push(crate::renderer::Vertex { position: [x2, y1], color });
+                vertices.push(crate::renderer::Vertex { position: [x2, y2], color });
+                vertices.push(crate::renderer::Vertex { position: [x1, y2], color });
+            }
+            DrawCommand::Present => {}
+        }
+    }
+
+    (clear_color, vertices)
+}
 
