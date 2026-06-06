@@ -6,6 +6,7 @@ use winit::window::Window;
 
 use crate::draw_command::DrawCommand;
 use crate::renderer;
+use crate::transform::TransformBuffer;
 
 pub struct State {
     instance: wgpu::Instance,
@@ -17,6 +18,7 @@ pub struct State {
     surface_format: wgpu::TextureFormat,
     command_buffer: Arc<Mutex<Vec<DrawCommand>>>,
     pipeline: wgpu::RenderPipeline,
+    transforms: TransformBuffer,
 }
 
 impl State {
@@ -62,6 +64,7 @@ impl State {
             surface_format,
             command_buffer,
             pipeline,
+            transforms: TransformBuffer::new(),
         };
 
         state.configure_surface();
@@ -92,11 +95,22 @@ impl State {
         self.configure_surface();
     }
 
+    fn process_transforms(&mut self, commands: &[DrawCommand]) {
+        self.transforms.clear();
+        for cmd in commands {
+            if let DrawCommand::SetTransform { id, tx, ty, sx, sy } = cmd {
+                self.transforms.set(*id, crate::transform::Transform::new(*tx, *ty, *sx, *sy, 0.0));
+            }
+        }
+    }
+
     pub fn render(&mut self) {
         let commands = {
             let locked = self.command_buffer.lock().unwrap();
             locked.clone()
         };
+
+        self.process_transforms(&commands);
 
         let (clear_color, vertices) = crate::draw_command::extract_draw_data(&commands);
 

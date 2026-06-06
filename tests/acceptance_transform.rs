@@ -1,4 +1,5 @@
 use wgpu_vulkan_spike::draw_command::{DrawCommand, parse_command};
+use wgpu_vulkan_spike::transform::Transform;
 
 #[test]
 fn parse_set_transform_command() {
@@ -52,4 +53,33 @@ fn parse_clear_still_works() {
             a: 1.0
         })
     );
+}
+
+#[test]
+fn transform_identity() {
+    let t = Transform::identity();
+    let matrix = t.to_matrix();
+    assert_eq!(t.tx, 0.0);
+    assert_eq!(t.ty, 0.0);
+    assert_eq!(t.sx, 1.0);
+    assert_eq!(t.sy, 1.0);
+    assert_eq!(matrix[0][0], 1.0);
+    assert_eq!(matrix[1][1], 1.0);
+    assert_eq!(matrix[3][3], 1.0);
+}
+
+#[test]
+fn transform_translation() {
+    let t = Transform::new(0.5, -0.25, 1.0, 1.0, 0.0);
+    let matrix = t.to_matrix();
+    assert_eq!(matrix[0][3], 0.5);
+    assert_eq!(matrix[1][3], -0.25);
+}
+
+#[test]
+fn transform_scale() {
+    let t = Transform::new(0.0, 0.0, 2.0, 3.0, 0.0);
+    let matrix = t.to_matrix();
+    assert_eq!(matrix[0][0], 2.0);
+    assert_eq!(matrix[1][1], 3.0);
 }
